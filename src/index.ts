@@ -799,6 +799,7 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
     );
   }
   const chainId = resolveChainId(args.chain as string | number | undefined);
+  assertChainAvailable(chainId);
   switch (name) {
     case 'get_balance':
       return getBalance(apiKey, chainId, reqStr(args, 'address', '"0xd8da6bf26964af9d7eed9e03e53415d37aa96045" (vitalik.eth)'));
@@ -838,21 +839,76 @@ function resolveChainId(chain: string | number | undefined): number {
   return entry.id;
 }
 
+// Etherscan "API Updates: Supported Chains, Overage & Terms of Service" email
+// to subscriptions@mojibake.ai, 2026-10-04 (fleet #2684). Neither opBNB nor the
+// two community chains below were ever named slugs in CHAINS above, so the
+// only path a caller reaches them is a bare numeric chain ID forwarded
+// straight through to Etherscan via resolveChainId's passthrough branch.
+// Gate that path explicitly instead of letting it 200 today and fail at the
+// vendor with no explanation once the cutover date passes.
+const SUNSET_CHAINS: Record<number, { name: string; sunsetDate: string }> = {
+  204: { name: 'opBNB Mainnet', sunsetDate: '2026-10-12' },
+  5611: { name: 'opBNB Testnet', sunsetDate: '2026-10-12' },
+};
+
+// Community endpoints that require Etherscan's Lite plan ($49/mo) or above
+// starting 2026-10-16. Pipeworx's platform key (PLATFORM_ETHERSCAN_KEY) is
+// currently able to reach these (verified live 2026-10-04), so this is a
+// forward block for the date the vendor names, not a reaction to a failure
+// happening today. Whether to upgrade the plan is a money question filed
+// separately for Bruce; this just refuses cleanly with the date rather than
+// forwarding a request that will start failing at the vendor.
+const PLAN_GATED_CHAINS: Record<number, { name: string; gateDate: string }> = {
+  4663: { name: 'Robinhood Chain', gateDate: '2026-10-16' },
+  5042: { name: 'Arc Mainnet', gateDate: '2026-10-16' },
+};
+
+function assertChainAvailable(chainId: number): void {
+  const sunset = SUNSET_CHAINS[chainId];
+  if (sunset) {
+    throw new Error(
+      `Unknown chain "${chainId}" -- Etherscan (the vendor) dropped API support for ${sunset.name} effective ${sunset.sunsetDate}. Pass a different chain.`,
+    );
+  }
+  const gated = PLAN_GATED_CHAINS[chainId];
+  if (gated) {
+    throw new Error(
+      `Unknown chain "${chainId}" -- ${gated.name} requires an Etherscan Lite plan ($49/mo) or above, effective ${gated.gateDate}; Pipeworx's platform key is on the Free tier. Pass your own Etherscan key with a qualifying plan via _apiKey, or use a different chain.`,
+    );
+  }
+}
+
 function chainMeta(id: number) {
   return Object.values(CHAINS).find((c) => c.id === id) ?? null;
 }
 
+// Etherscan message/result strings that mean "you've hit a rate limit or a
+// usage cap", vs. a genuine request error. From 2026-11-01 requests past the
+// daily limit are BLOCKED rather than served (vendor email, fleet #2684) --
+// classify those as upstream_throttled (retrying later may work) rather than
+// the generic `error` tier (meaning "Pipeworx has a defect"), so triage and
+// ask_pipeworx's retry logic both read it correctly instead of a quota hit
+// silently looking like our own bug.
+const RATE_LIMIT_PATTERN = /rate limit|max (?:calls?|requests?|daily)|daily (?:limit|quota|rate)|usage limit|too many requests/i;
+
 async function esFetch<T>(apiKey: string, chainId: number, params: Record<string, string>): Promise<T> {
   const search = new URLSearchParams({ chainid: String(chainId), apikey: apiKey, ...params });
   const res = await pwFetch(`${BASE_URL}?${search}`);
+  if (res.status === 429) {
+    const body = await res.text();
+    throw new Error(`upstream_throttled: Etherscan rate-limited this request (HTTP 429). ${summarizeErrorBody(body)}`.trim());
+  }
   if (!res.ok) {
     const body = await res.text();
-    throw new Error(`Etherscan error: ${res.status} ${body.slice(0, 200)}`);
+    throw new Error(`Etherscan error: ${res.status} ${summarizeErrorBody(body)}`);
   }
   const data = (await res.json()) as { status?: string; message?: string; result?: unknown };
   // Etherscan responses use status: "1" for success, "0" for "No transactions found" (which is fine)
   if (data.status === '0' && data.message && data.message !== 'No transactions found' && data.message !== 'No records found') {
-    throw new Error(`Etherscan: ${data.message} (${typeof data.result === 'string' ? data.result : ''})`.trim());
+    const resultStr = typeof data.result === 'string' ? data.result : '';
+    const combined = `${data.message} ${resultStr}`;
+    const prefix = RATE_LIMIT_PATTERN.test(combined) ? 'upstream_throttled: ' : '';
+    throw new Error(`${prefix}Etherscan: ${data.message} (${resultStr})`.trim());
   }
   return data as T;
 }
