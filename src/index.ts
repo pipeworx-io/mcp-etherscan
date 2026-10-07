@@ -684,6 +684,16 @@ function collapse(s: string): string {
  * - list_transactions:   normal / internal / token / nft transfers
  * - get_contract_abi:    verified contract ABI
  * - get_contract_source: verified contract source + compiler metadata
+ *
+ * BYO is the SETTLED posture (Bruce, 2026-10-07, fleet #2690: "byok"). Etherscan
+ * changed its terms 2026-10-01: Free/Lite/Standard are personal/research use
+ * only; commercial use (an app run by or for a business, which Pipeworx is)
+ * needs the Advanced plan ($299/mo+). Pipeworx's platform key was on the Free
+ * tier -- outside those terms -- and $299/mo is not a price the ~6 calls/day
+ * this pack gets supports. PLATFORM_ETHERSCAN_KEY is dropped from the gateway
+ * manifest; no platform key is fronted. A call with no `_apiKey` refuses with
+ * "requires an API key" (see the check right after the switch below).
+ * Decision record: scripts/vendors/intent.json -> etherscan.
  */
 
 
@@ -795,7 +805,7 @@ async function callTool(name: string, args: Record<string, unknown>): Promise<un
   const apiKey = (args._apiKey as string | undefined)?.trim();
   if (!apiKey) {
     throw new Error(
-      'Etherscan requires an API key (free 100k/day at https://etherscan.io/apis). Contact the operator about platform credentials, or BYO via ?_apiKey=<key>.',
+      'Etherscan requires an API key (free 100k/day at https://etherscan.io/apis). Pipeworx does not front a platform key for this pack (Etherscan\'s commercial-use terms require a paid Advanced plan we do not carry) -- register your own free key and pass it via ?_apiKey=<key>.',
     );
   }
   const chainId = resolveChainId(args.chain as string | number | undefined);
@@ -852,12 +862,11 @@ const SUNSET_CHAINS: Record<number, { name: string; sunsetDate: string }> = {
 };
 
 // Community endpoints that require Etherscan's Lite plan ($49/mo) or above
-// starting 2026-10-16. Pipeworx's platform key (PLATFORM_ETHERSCAN_KEY) is
-// currently able to reach these (verified live 2026-10-04), so this is a
-// forward block for the date the vendor names, not a reaction to a failure
-// happening today. Whether to upgrade the plan is a money question filed
-// separately for Bruce; this just refuses cleanly with the date rather than
-// forwarding a request that will start failing at the vendor.
+// starting 2026-10-16. Pipeworx carries no platform key at all any more
+// (fleet #2690: BYO is the settled posture), so every caller here is already
+// on their own key -- this gate refuses cleanly with the date rather than
+// forwarding a request that only works on a qualifying plan the caller may
+// not have.
 const PLAN_GATED_CHAINS: Record<number, { name: string; gateDate: string }> = {
   4663: { name: 'Robinhood Chain', gateDate: '2026-10-16' },
   5042: { name: 'Arc Mainnet', gateDate: '2026-10-16' },
@@ -873,7 +882,7 @@ function assertChainAvailable(chainId: number): void {
   const gated = PLAN_GATED_CHAINS[chainId];
   if (gated) {
     throw new Error(
-      `Unknown chain "${chainId}" -- ${gated.name} requires an Etherscan Lite plan ($49/mo) or above, effective ${gated.gateDate}; Pipeworx's platform key is on the Free tier. Pass your own Etherscan key with a qualifying plan via _apiKey, or use a different chain.`,
+      `Unknown chain "${chainId}" -- ${gated.name} requires an Etherscan Lite plan ($49/mo) or above, effective ${gated.gateDate}. Your _apiKey needs a qualifying plan, or use a different chain.`,
     );
   }
 }

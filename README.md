@@ -2,7 +2,7 @@
 
 Etherscan V2 MCP — multichain (50+ EVM chains) block-explorer access.
 
-Part of [Pipeworx](https://pipeworx.io) — an MCP gateway connecting AI agents to 1689+ live data sources. This is an independent, unofficial integration — not affiliated with, endorsed by, or published by the upstream provider.
+Part of [Pipeworx](https://pipeworx.io) — an MCP gateway connecting AI agents to 1704+ live data sources. This is an independent, unofficial integration — not affiliated with, endorsed by, or published by the upstream provider.
 
 ## Tools
 
@@ -14,8 +14,15 @@ Part of [Pipeworx](https://pipeworx.io) — an MCP gateway connecting AI agents 
 
 ## Auth
 
-- **Platform key:** gateway env `PLATFORM_ETHERSCAN_KEY`.
-- **BYO:** `?_apiKey=<key>` after registering at https://etherscan.io/apis (free 100k/day, 5 req/sec).
+**BYO is the settled posture (Bruce, 2026-10-07, fleet #2690).** Etherscan
+changed its terms 2026-10-01: Free/Lite/Standard plans are personal and
+research use only, and commercial use (an app run by or for a business, which
+Pipeworx is) needs the Advanced plan ($299/mo or above). Pipeworx's platform
+key was on the Free tier — outside those terms, and not worth $299/mo for the
+~6 calls/day this pack gets. No platform key is fronted any more; a call
+without one refuses with "requires an API key" and points at registration.
+
+- **BYO:** `?_apiKey=<key>` after registering at https://etherscan.io/apis (free 100k/day, 5 req/sec) — the caller's own key, and the caller's own plan tier, keeps the terms on the caller.
 
 ## Data source
 
@@ -65,7 +72,7 @@ directly, instead of just this one's:
 }
 ```
 
-Both URLs reach the same gateway and the same 1689+ data sources. The
+Both URLs reach the same gateway and the same 1704+ data sources. The
 only difference is which pack's tools are listed **directly**; `ask_pipeworx`
 reaches all of them from either one.
 
